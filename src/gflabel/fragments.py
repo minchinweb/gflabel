@@ -469,7 +469,7 @@ class BoltBase(Fragment):
     """Base class for handling common bolt/screw configuration"""
 
     # The options for head shape
-    HEAD_SHAPES = {"countersunk", "pan", "round", "socket", "wafer"}
+    HEAD_SHAPES = {"countersunk", "pan", "round", "socket", "wafer", "standoff"}
     # Other, non-drive features
     MODIFIERS = {"tapping", "flip", "partial"}
     # Other names that features can be known as, and what they map to
@@ -527,12 +527,27 @@ class BoltFragment(BoltBase):
         length = self.length
         # line width: How thick the head and body are
         lw = height / 2.25
+        # generally, we draw the bold at the line width; with a standoff we
+        #       swap that
+        # generally, the head height is the line width
+        if self.headshape == "standoff":
+            head_lenght = lw * 2  # guesstimate
+            # bolt_width = height / 2
+            bolt_width = height * 2 / 3
+
+            # tweak lenght
+            # this is an ugly hack, but it makes the standoffs the right length
+            length = length + head_lenght - lw
+        else:
+            head_lenght = lw
+            bolt_width = lw
+
         # The half-width of the dividing split
         half_split = 0.75
 
         # With countersunk bolts, the length includes the head
         if self.headshape == "countersunk":
-            length -= lw
+            length -= head_lenght
 
         # Don't allow lengths smaller than lw
         # length = max(length, lw * 2 + half_split)
@@ -546,16 +561,16 @@ class BoltFragment(BoltBase):
         else:
             hw = (length + lw) / 2
 
-        head_h = height / 2
+        head_height = height / 2
         # If asked for flanged, just shrink the head vertically
         if self.flanged:
-            head_h -= lw / 3
+            head_height -= lw / 3
 
         # Work out what the bottom of the bolt looks like
         if "tapping" in self.modifiers:
-            bolt_bottom = [(hw - lw / 2, lw / 2), (hw, 0), (hw - lw / 2, -lw / 2)]
+            bolt_bottom = [(hw - lw / 2, bolt_width / 2), (hw, 0), (hw - lw / 2, -bolt_width / 2)]
         else:
-            bolt_bottom = [(hw, lw / 2), (hw, -lw / 2)]
+            bolt_bottom = [(hw, bolt_width / 2), (hw, -bolt_width / 2)]
 
         # Whether the bolt is split or not, we always need a head part
         with BuildSketch(mode=Mode.PRIVATE) as sketch:
@@ -567,13 +582,13 @@ class BoltFragment(BoltBase):
                 if self.headshape == "pan":
                     head_radius = min(2, lw / 2)
                     _top_arc = CenterArc(
-                        (-hw + head_radius, head_h - head_radius),
+                        (-hw + head_radius, head_height - head_radius),
                         head_radius,
                         90,
                         90,
                     )
                     _bottom_arc = CenterArc(
-                        (-hw + head_radius, -head_h + head_radius),
+                        (-hw + head_radius, -head_height + head_radius),
                         head_radius,
                         180,
                         90,
@@ -583,17 +598,17 @@ class BoltFragment(BoltBase):
                         head_connector_top = _top_arc @ 0
                         head_connector_bottom = _bottom_arc @ 1
                     else:
-                        head_connector_top = Vector(-hw + lw, head_h)
-                        head_connector_bottom = Vector(-hw + lw, -head_h)
+                        head_connector_top = Vector(-hw + lw, head_height)
+                        head_connector_bottom = Vector(-hw + lw, -head_height)
                         Line([head_connector_top, _top_arc @ 0])
                         Line([head_connector_bottom, _bottom_arc @ 1])
                 elif self.headshape == "socket":
                     _head = Polyline(
                         [
-                            (-hw + lw, -head_h),
-                            (-hw, -head_h),
-                            (-hw, head_h),
-                            (-hw + lw, head_h),
+                            (-hw + head_lenght, -head_height),
+                            (-hw, -head_height),
+                            (-hw, head_height),
+                            (-hw + head_lenght, head_height),
                         ]
                     )
                     head_connector_bottom = _head @ 0
@@ -603,22 +618,36 @@ class BoltFragment(BoltBase):
                     # being only 1/3 the linewidth thick
                     _head = Polyline(
                         [
-                            (-hw + lw, -head_h),
-                            (-hw + lw * 2 / 3, -head_h),
-                            (-hw + lw * 2 / 3, head_h),
-                            (-hw + lw, head_h),
+                            (-hw + head_lenght, -head_height),
+                            (-hw + head_lenght * 2 / 3, -head_height),
+                            (-hw + head_lenght * 2 / 3, head_height),
+                            (-hw + head_lenght, head_height),
                         ]
                     )
                     head_connector_bottom = _head @ 0
                     head_connector_top = _head @ 1
                 elif self.headshape == "countersunk":
-                    head_connector_bottom = Vector(-hw, -head_h)
-                    head_connector_top = Vector(-hw, head_h)
+                    head_connector_bottom = Vector(-hw, -head_height)
+                    head_connector_top = Vector(-hw, head_height)
                     Line([head_connector_bottom, head_connector_top])
                 elif self.headshape == "round":
-                    _head = EllipticalCenterArc((-hw + lw, 0), lw, head_h, 90, -90)
+                    _head = EllipticalCenterArc((-hw + lw, 0), lw, head_height, 90, -90)
                     head_connector_top = _head @ 0
                     head_connector_bottom = _head @ 1
+                # elif self.headshape.startswith("standoff"):
+                elif self.headshape == "standoff":
+                    _standoff_stem = 6;
+                    # _standoff_stem = lw;
+                    _head = Polyline(
+                        [
+                            (-hw + head_lenght, -head_height / 3),
+                            (-hw, -head_height / 3),
+                            (-hw, head_height / 3),
+                            (-hw + head_lenght, head_height / 3),
+                        ]
+                    )
+                    head_connector_bottom = _head @ 0
+                    head_connector_top = _head @ 1
                 else:
                     raise ValueError(f"Unknown bolt head type: {self.headshape!r}")
 
@@ -627,23 +656,23 @@ class BoltFragment(BoltBase):
                     Polyline(
                         [
                             head_connector_top,
-                            (-hw + lw, lw / 2),
+                            (-hw + head_lenght, bolt_width / 2),
                             *bolt_bottom,
-                            (-hw + lw, -lw / 2),
+                            (-hw + head_lenght, -bolt_width / 2),
                             head_connector_bottom,
                         ],
                     )
                 else:
                     # We have the divider attached to the head to make
-                    x_shaft_midpoint = lw + (maxsize - lw) / 2 - hw
+                    x_shaft_midpoint = head_lenght + (maxsize - lw) / 2 - hw
                     Polyline(
                         [
                             head_connector_top,
-                            (-hw + lw, lw / 2),
+                            (-hw + head_lenght, bolt_width / 2),
                             # Divider is halfway along the shaft
-                            (x_shaft_midpoint + lw / 2 - half_split, lw / 2),
-                            (x_shaft_midpoint - lw / 2 - half_split, -lw / 2),
-                            (-hw + lw, -lw / 2),
+                            (x_shaft_midpoint + head_lenght / 2 - half_split, bolt_width / 2),
+                            (x_shaft_midpoint - head_lenght / 2 - half_split, -bolt_width / 2),
+                            (-hw + head_lenght, -bolt_width / 2),
                             head_connector_bottom,
                         ],
                     )
@@ -656,9 +685,9 @@ class BoltFragment(BoltBase):
                     Polyline(
                         [
                             # Divider is halfway along the shaft
-                            (x_shaft_midpoint + lw / 2 + half_split, lw / 2),
+                            (x_shaft_midpoint + head_lenght / 2 + half_split, bolt_width / 2),
                             *bolt_bottom,
-                            (x_shaft_midpoint - lw / 2 + half_split, -lw / 2),
+                            (x_shaft_midpoint - head_lenght / 2 + half_split, -bolt_width / 2),
                         ],
                         close=True,
                     )
